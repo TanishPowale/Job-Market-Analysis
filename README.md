@@ -1,12 +1,11 @@
-\ **Job Market Analysis**
+**Job Market Analysis**
 
 
 
 The Job Market Analysis system processes job postings using Hadoop HDFS and Apache Spark, stores processed data in SQLite, and provides an interactive Streamlit dashboard to explore job market trends.
 
 
-
-\ **Features**
+ **Features**
 
 
 
@@ -24,7 +23,7 @@ The Job Market Analysis system processes job postings using Hadoop HDFS and Apac
 
 
 
-\ **Technologies Used**
+**Technologies Used**
 
 
 
@@ -44,7 +43,7 @@ The Job Market Analysis system processes job postings using Hadoop HDFS and Apac
 
 
 
-\ **Dataset**
+**Dataset**
 
 
 
@@ -52,7 +51,7 @@ The project uses the \[Lynceus Jobs dataset](https://huggingface.co/datasets/Lyn
 
 
 
-\ **Project Structure**
+**Project Structure**
 
 
 
@@ -86,7 +85,7 @@ Job-Market-Analysis/
 
 
 
-\ **Prerequisites**
+**Prerequisites**
 
 
 
@@ -104,7 +103,7 @@ Job-Market-Analysis/
 
 
 
-\ **Installation**
+**Installation**
 
 
 
@@ -148,7 +147,7 @@ pip install -r requirements.txt
 
 
 
-\ **Starting Hadoop HDFS**
+**Starting Hadoop HDFS**
 
 
 
@@ -192,7 +191,7 @@ http://localhost:9870
 
 
 
-\ **Inspecting HDFS**
+**Inspecting HDFS**
 
 
 
@@ -220,7 +219,7 @@ hdfs dfs -ls -R /jobmarket
 
 
 
-\ **Running the Dashboard**
+**Running the Dashboard**
 
 
 
@@ -244,7 +243,7 @@ http://localhost:8501
 
 
 
-\ **Stopping Hadoop HDFS**
+**Stopping Hadoop HDFS**
 
 
 
@@ -260,7 +259,7 @@ When finished, run:
 
 
 
-\ **Data Processing Workflow**
+**Data Processing Workflow**
 
 
 
