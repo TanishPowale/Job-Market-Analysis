@@ -1,0 +1,17 @@
+# Python environment
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Local datasets and databases
+data/jobs.csv
+data/jobmarket.db
+require.txt
+
+# Generated Spark output
+data/processed_jobs/
+data/*.parquet
+*.parquet
+*.crc
+_SUCCESS
