@@ -277,7 +277,7 @@ When finished, run:
 
 
 
-\ **Future Scope**
+**Future Scope**
 
 
 
@@ -289,7 +289,7 @@ When finished, run:
 
 
 
-\ **Author**
+**Author**
 
 
 
