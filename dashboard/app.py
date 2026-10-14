@@ -1,7 +1,16 @@
+
 import streamlit as st
 import sqlite3
 import pandas as pd
 import altair as alt
+from pathlib import Path
+import sys
+
+project_dir = Path(__file__).resolve().parent.parent
+if str(project_dir) not in sys.path:
+    sys.path.insert(0, str(project_dir))
+
+from hadoop.company_counts import run_hadoop_company_counts
 
 # ---------------------------------------------------------
 # PAGE CONFIGURATION
@@ -18,12 +27,10 @@ st.set_page_config(
 # ---------------------------------------------------------
 
 st.markdown("""
-
 <style>
 [data-testid="stSidebar"] {
     background-color: #e6f4ff;
 }
-
 [data-testid="stSidebar"] * {
     color: #1f2937;
 }
@@ -32,13 +39,11 @@ st.markdown("""
     font-weight: 700;
     margin-bottom: 0px;
 }
-
 .subtitle {
     color: #666;
     font-size: 16px;
     margin-bottom: 25px;
 }
-
 .kpi-card {
     padding: 18px;
     border-radius: 10px;
@@ -46,24 +51,20 @@ st.markdown("""
     border: 1px solid #e5e7eb;
     text-align: center;
 }
-
 .kpi-title {
     font-size: 14px;
     color: #666;
 }
-
 .kpi-value {
     font-size: 28px;
     font-weight: 700;
     margin-top: 5px;
 }
-
 .section-title {
     font-size: 22px;
     font-weight: 600;
     margin-top: 15px;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,28 +72,61 @@ st.markdown("""
 # LOAD DATA
 # ---------------------------------------------------------
 
-conn = sqlite3.connect("data/jobmarket.db")
+@st.cache_data
+def load_jobs():
+    with sqlite3.connect("data/jobmarket.db") as conn:
+        return pd.read_sql_query("SELECT * FROM jobs", conn)
 
-df = pd.read_sql_query(
-    "SELECT * FROM jobs",
-    conn
-)
-
-conn.close()
+df = load_jobs()
 
 # ---------------------------------------------------------
 # DATA CLEANING
 # ---------------------------------------------------------
 
-df["title"] = df["title"].fillna("")
-df["company"] = df["company"].fillna("")
-df["location"] = df["location"].fillna("")
-df["remote"] = df["remote"].fillna("")
+for column in ["title", "company", "location", "remote"]:
+    df[column] = df[column].fillna("").astype(str)
 
-df["posted"] = pd.to_datetime(
-    df["posted"],
-    errors="coerce"
-)
+df["posted"] = pd.to_datetime(df["posted"], errors="coerce")
+
+# ---------------------------------------------------------
+# HADOOP MAPREDUCE: FILTERED COMPANY COUNTS
+# ---------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def get_hadoop_company_counts(companies):
+    return run_hadoop_company_counts(companies)
+
+
+def get_precomputed_demo_company_counts(scenario):
+    with sqlite3.connect("data/jobmarket.db") as conn:
+        table_exists = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'demo_company_counts'
+            """
+        ).fetchone()
+        if not table_exists:
+            return None
+
+        rows = conn.execute(
+            """
+            SELECT company, jobs
+            FROM demo_company_counts
+            WHERE scenario = ?
+            """,
+            (scenario,)
+        ).fetchall()
+
+    if not rows:
+        return None
+
+    return pd.DataFrame(
+        [row for row in rows if row[0] is not None],
+        columns=["Company", "Jobs"]
+    )
+
+
 
 # ---------------------------------------------------------
 # HEADER
@@ -103,14 +137,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-
-
 # ---------------------------------------------------------
 # SIDEBAR FILTERS
 # ---------------------------------------------------------
 
 st.sidebar.header("🎛️ Filters")
-
 st.sidebar.markdown("### Job Search")
 
 search = st.sidebar.text_input(
@@ -133,13 +164,11 @@ work_type = st.sidebar.selectbox(
     ["All", "Remote", "Onsite"]
 )
 
-# Date range
 st.sidebar.markdown("### Posted Date")
 
 valid_dates = df["posted"].dropna()
 
-if len(valid_dates) > 0:
-
+if not valid_dates.empty:
     min_date = valid_dates.min().date()
     max_date = valid_dates.max().date()
 
@@ -149,7 +178,6 @@ if len(valid_dates) > 0:
         min_value=min_date,
         max_value=max_date
     )
-
 else:
     date_range = None
 
@@ -159,65 +187,43 @@ else:
 
 filtered_df = df.copy()
 
-# Job role
 if search:
     filtered_df = filtered_df[
         filtered_df["title"].str.contains(
-            search,
-            case=False,
-            na=False
+            search, case=False, na=False
         )
     ]
 
-# Location
 if location:
     filtered_df = filtered_df[
         filtered_df["location"].str.contains(
-            location,
-            case=False,
-            na=False
+            location, case=False, na=False
         )
     ]
 
-# Company
 if company:
     filtered_df = filtered_df[
         filtered_df["company"].str.contains(
-            company,
-            case=False,
-            na=False
+            company, case=False, na=False
         )
     ]
 
-# Work type
 if work_type == "Remote":
-
     filtered_df = filtered_df[
-        filtered_df["remote"]
-        .astype(str)
-        .str.lower()
-        == "true"
+        filtered_df["remote"].str.lower() == "true"
     ]
-
 elif work_type == "Onsite":
-
     filtered_df = filtered_df[
-        filtered_df["remote"]
-        .astype(str)
-        .str.lower()
-        == "false"
+        filtered_df["remote"].str.lower() == "false"
     ]
 
-# Date range
 if date_range and len(date_range) == 2:
-
     start_date = pd.Timestamp(date_range[0])
-    end_date = pd.Timestamp(date_range[1])
+    end_date = pd.Timestamp(date_range[1]) + pd.Timedelta(days=1)
 
     filtered_df = filtered_df[
         (filtered_df["posted"] >= start_date)
-        &
-        (filtered_df["posted"] <= end_date)
+        & (filtered_df["posted"] < end_date)
     ]
 
 # ---------------------------------------------------------
@@ -244,9 +250,7 @@ with kpi2:
         f"""
         <div class="kpi-card">
             <div class="kpi-title">Companies</div>
-            <div class="kpi-value">
-                {filtered_df["company"].nunique():,}
-            </div>
+            <div class="kpi-value">{filtered_df["company"].nunique():,}</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -257,9 +261,7 @@ with kpi3:
         f"""
         <div class="kpi-card">
             <div class="kpi-title">Locations</div>
-            <div class="kpi-value">
-                {filtered_df["location"].nunique():,}
-            </div>
+            <div class="kpi-value">{filtered_df["location"].nunique():,}</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -270,9 +272,7 @@ with kpi4:
         f"""
         <div class="kpi-card">
             <div class="kpi-title">Job Roles</div>
-            <div class="kpi-value">
-                {filtered_df["title"].nunique():,}
-            </div>
+            <div class="kpi-value">{filtered_df["title"].nunique():,}</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -286,10 +286,7 @@ st.divider()
 
 col1, col2 = st.columns(2)
 
-# ---------------- TOP JOB ROLES ----------------
-
 with col1:
-
     st.markdown(
         '<div class="section-title">💼 Top Job Roles</div>',
         unsafe_allow_html=True
@@ -304,102 +301,89 @@ with col1:
 
     top_roles.columns = ["Job Role", "Jobs"]
 
-    if len(top_roles) > 0:
-
+    if not top_roles.empty:
         chart_roles = (
             alt.Chart(top_roles)
             .mark_bar()
             .encode(
-                x=alt.X(
-                    "Jobs:Q",
-                    title="Number of Jobs"
-                ),
-                y=alt.Y(
-                    "Job Role:N",
-                    sort="-x",
-                    title="Job Role"
-                ),
-                tooltip=[
-                    "Job Role",
-                    "Jobs"
-                ]
+                x=alt.X("Jobs:Q", title="Number of Jobs"),
+                y=alt.Y("Job Role:N", sort="-x", title="Job Role"),
+                tooltip=["Job Role", "Jobs"]
             )
-            .properties(
-                height=350
-            )
+            .properties(height=350)
         )
 
-        st.altair_chart(
-            chart_roles,
-            use_container_width=True
-        )
-
+        st.altair_chart(chart_roles, use_container_width=True)
     else:
         st.info("No job roles found.")
 
-# ---------------- TOP COMPANIES ----------------
-
 with col2:
-
     st.markdown(
         '<div class="section-title">🏢 Top Companies</div>',
         unsafe_allow_html=True
     )
 
-    top_companies = (
-        filtered_df["company"]
-        .value_counts()
-        .head(10)
-        .reset_index()
-    )
+    try:
+        demo_scenario = None
+        if (
+            not company
+            and work_type == "All"
+            and not valid_dates.empty
+            and date_range
+            and len(date_range) == 2
+            and date_range[0] == valid_dates.min().date()
+            and date_range[1] == valid_dates.max().date()
+        ):
+            demo_scenario = {
+                ("", ""): "all",
+                ("engineer", ""): "engineer",
+                ("engineer", "mumbai"): "engineer_mumbai",
+                ("analyst", ""): "analyst",
+                ("analyst", "mumbai"): "analyst_mumbai",
+            }.get((search.casefold(), location.casefold()))
 
-    top_companies.columns = ["Company", "Jobs"]
+        top_companies = (
+            get_precomputed_demo_company_counts(demo_scenario)
+            if demo_scenario
+            else None
+        )
+        if top_companies is None:
+            top_companies = get_hadoop_company_counts(filtered_df["company"])
 
-    if len(top_companies) > 0:
-
-        chart_companies = (
-            alt.Chart(top_companies)
-            .mark_bar()
-            .encode(
-                x=alt.X(
-                    "Jobs:Q",
-                    title="Number of Jobs"
-                ),
-                y=alt.Y(
-                    "Company:N",
-                    sort="-x",
-                    title="Company"
-                ),
-                tooltip=[
-                    "Company",
-                    "Jobs"
-                ]
-            )
-            .properties(
-                height=350
-            )
+        top_companies = (
+            top_companies
+            .sort_values("Jobs", ascending=False)
+            .head(10)
         )
 
-        st.altair_chart(
-            chart_companies,
-            use_container_width=True
-        )
+        if not top_companies.empty:
+            chart_companies = (
+                alt.Chart(top_companies)
+                .mark_bar()
+                .encode(
+                    x=alt.X("Jobs:Q", title="Number of Jobs"),
+                    y=alt.Y("Company:N", sort="-x", title="Company"),
+                    tooltip=["Company", "Jobs"]
+                )
+                .properties(height=350)
+            )
 
-    else:
-        st.info("No companies found.")
+            st.altair_chart(chart_companies, use_container_width=True)
+        else:
+            st.info("No companies found.")
+
+    except Exception as exc:
+        st.error(f"Hadoop company counts failed: {exc}")
+        st.exception(exc)
 
 # ---------------------------------------------------------
 # LOCATIONS + REMOTE/ONSITE
 # ---------------------------------------------------------
 
 st.divider()
-
 col1, col2 = st.columns(2)
 
-# ---------------- TOP LOCATIONS ----------------
-
 with col1:
-
     st.markdown(
         '<div class="section-title">🌍 Top Job Locations</div>',
         unsafe_allow_html=True
@@ -414,43 +398,23 @@ with col1:
 
     top_locations.columns = ["Location", "Jobs"]
 
-    if len(top_locations) > 0:
-
+    if not top_locations.empty:
         chart_locations = (
             alt.Chart(top_locations)
             .mark_bar()
             .encode(
-                x=alt.X(
-                    "Jobs:Q",
-                    title="Number of Jobs"
-                ),
-                y=alt.Y(
-                    "Location:N",
-                    sort="-x",
-                    title="Location"
-                ),
-                tooltip=[
-                    "Location",
-                    "Jobs"
-                ]
+                x=alt.X("Jobs:Q", title="Number of Jobs"),
+                y=alt.Y("Location:N", sort="-x", title="Location"),
+                tooltip=["Location", "Jobs"]
             )
-            .properties(
-                height=350
-            )
+            .properties(height=350)
         )
 
-        st.altair_chart(
-            chart_locations,
-            use_container_width=True
-        )
-
+        st.altair_chart(chart_locations, use_container_width=True)
     else:
         st.info("No locations found.")
 
-# ---------------- REMOTE VS ONSITE ----------------
-
 with col2:
-
     st.markdown(
         '<div class="section-title">🏠 Remote vs Onsite</div>',
         unsafe_allow_html=True
@@ -458,50 +422,30 @@ with col2:
 
     work_counts = (
         filtered_df["remote"]
-        .astype(str)
         .str.lower()
-        .replace({
-            "true": "Remote",
-            "false": "Onsite"
-        })
+        .replace({"true": "Remote", "false": "Onsite"})
         .value_counts()
         .reset_index()
     )
 
     work_counts.columns = ["Work Type", "Jobs"]
 
-    if len(work_counts) > 0:
-
+    if not work_counts.empty:
         donut = (
             alt.Chart(work_counts)
-            .mark_arc(
-                innerRadius=70
-            )
+            .mark_arc(innerRadius=70)
             .encode(
-                theta=alt.Theta(
-                    "Jobs:Q"
-                ),
+                theta=alt.Theta("Jobs:Q"),
                 color=alt.Color(
                     "Work Type:N",
-                    legend=alt.Legend(
-                        title="Work Type"
-                    )
+                    legend=alt.Legend(title="Work Type")
                 ),
-                tooltip=[
-                    "Work Type",
-                    "Jobs"
-                ]
+                tooltip=["Work Type", "Jobs"]
             )
-            .properties(
-                height=350
-            )
+            .properties(height=350)
         )
 
-        st.altair_chart(
-            donut,
-            use_container_width=True
-        )
-
+        st.altair_chart(donut, use_container_width=True)
     else:
         st.info("No work-type data found.")
 
@@ -517,52 +461,30 @@ st.markdown(
 )
 
 trend = (
-    filtered_df
-    .dropna(subset=["posted"])
+    filtered_df.dropna(subset=["posted"])
     .groupby("posted")
     .size()
     .reset_index(name="Jobs")
     .sort_values("posted")
 )
 
-if len(trend) > 0:
-
+if not trend.empty:
     trend_chart = (
         alt.Chart(trend)
-        .mark_line(
-            point=True
-        )
+        .mark_line(point=True)
         .encode(
-            x=alt.X(
-                "posted:T",
-                title="Posted Date"
-            ),
-            y=alt.Y(
-                "Jobs:Q",
-                title="Number of Jobs"
-            ),
+            x=alt.X("posted:T", title="Posted Date"),
+            y=alt.Y("Jobs:Q", title="Number of Jobs"),
             tooltip=[
-                alt.Tooltip(
-                    "posted:T",
-                    title="Date"
-                ),
-                alt.Tooltip(
-                    "Jobs:Q",
-                    title="Jobs"
-                )
+                alt.Tooltip("posted:T", title="Date"),
+                alt.Tooltip("Jobs:Q", title="Jobs")
             ]
         )
-        .properties(
-            height=350
-        )
+        .properties(height=350)
         .interactive()
     )
 
-    st.altair_chart(
-        trend_chart,
-        use_container_width=True
-    )
-
+    st.altair_chart(trend_chart, use_container_width=True)
 else:
     st.info("No hiring trend data found.")
 
@@ -582,20 +504,11 @@ st.caption(
 )
 
 display_df = filtered_df.copy()
-
-display_df["posted"] = display_df["posted"].dt.strftime(
-    "%Y-%m-%d"
-)
+display_df["posted"] = display_df["posted"].dt.strftime("%Y-%m-%d")
 
 st.dataframe(
     display_df[
-        [
-            "title",
-            "company",
-            "location",
-            "remote",
-            "posted"
-        ]
+        ["title", "company", "location", "remote", "posted"]
     ].head(200),
     use_container_width=True,
     height=400
@@ -612,15 +525,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-csv = filtered_df.to_csv(
-    index=False
-)
+csv_data = filtered_df.to_csv(index=False)
 
 st.download_button(
     label="📥 Download Filtered Jobs CSV",
-    data=csv,
+    data=csv_data,
     file_name="filtered_jobs.csv",
     mime="text/csv"
 )
-
-

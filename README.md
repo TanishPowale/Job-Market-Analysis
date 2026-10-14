@@ -225,6 +225,17 @@ hdfs dfs -ls -R /jobmarket
 
 After starting Hadoop and completing the required data-processing steps, run:
 
+For faster dashboard loading with no filters and for the four demo selections, precompute the Hadoop MapReduce company-count results before starting the dashboard:
+
+```powershell
+
+python -m hadoop.precompute_demo_counts
+
+```
+
+Rerun this command after updating the jobs database to refresh the saved counts.
+
+Then start the dashboard:
 
 
 ```powershell
@@ -298,4 +309,3 @@ When finished, run:
 
 
 GitHub: \[TanishPowale](https://github.com/TanishPowale)
-
